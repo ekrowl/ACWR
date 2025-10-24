@@ -2,45 +2,20 @@ import pandas as pd
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output
 
-# -----------------------------
-# Load and prepare data
-# -----------------------------
-
-# Load workload data
+# --- Load data ---
 workload_df = pd.read_csv("MasterWorkload.csv")
 workload_df["Session Date"] = pd.to_datetime(workload_df["Session Date"])
 
-# Load player positions
 positions_df = pd.read_csv("positions.csv")
 merged_df = workload_df.merge(positions_df, on="Player Name", how="right")
 
 # Sort by player/date
 merged_df = merged_df.sort_values(by=["Player Name", "Session Date"])
 
-# Metrics to include
-metrics = ["High Speed Running", "DSL"]
+# --- Metrics to include ---
+metrics = ["High Speed Running", "DSL", "Decelerations"]
 
-# -----------------------------
-# Remove extreme outliers per player
-# -----------------------------
-def remove_extreme_highs(df, metric, multiplier=2.5):
-    cleaned = pd.DataFrame()
-    for player, group in df.groupby("Player Name"):
-        Q1 = group[metric].quantile(0.25)
-        Q3 = group[metric].quantile(0.75)
-        IQR = Q3 - Q1
-        upper = Q3 + multiplier * IQR
-        # Keep all normal and low values; only remove unrealistically high spikes
-        group = group[group[metric] <= upper]
-        cleaned = pd.concat([cleaned, group])
-    return cleaned
-
-for metric in metrics:
-    merged_df = remove_extreme_highs(merged_df, metric, multiplier=2.5)
-
-# -----------------------------
-# Calculate ACWR metrics
-# -----------------------------
+# Calculate ACWR for each metric
 for metric in metrics:
     merged_df[f"Acute_{metric}"] = (
         merged_df.groupby("Player Name")[metric]
@@ -63,9 +38,7 @@ latest_df = (
     .tail(1)
 )
 
-# -----------------------------
-# Dash app
-# -----------------------------
+# --- Dash App ---
 app = Dash(__name__)
 
 app.layout = html.Div([
@@ -76,7 +49,8 @@ app.layout = html.Div([
         id="metric-dropdown",
         options=[
             {"label": "High Speed Running", "value": "High Speed Running"},
-            {"label": "DSL", "value": "DSL"}
+            {"label": "DSL", "value": "DSL"},
+            {"label": "Decelerations", "value": "Decelerations"}
         ],
         value="High Speed Running",
         clearable=False
@@ -92,9 +66,6 @@ app.layout = html.Div([
     dcc.Graph(id="acwr-comparison-chart")
 ])
 
-# -----------------------------
-# Callback to update chart
-# -----------------------------
 @app.callback(
     Output("acwr-comparison-chart", "figure"),
     Input("position-dropdown", "value"),
@@ -110,15 +81,15 @@ def update_chart(selected_position, selected_metric):
     chronic_col = f"Chronic_{selected_metric}"
     acwr_col = f"ACWR_{selected_metric}"
 
-    # Handle NaNs
+    # Drop rows with no data
     df = df.dropna(subset=[acute_col, chronic_col], how="all")
 
-    # Color based on ACWR thresholds
+    # Color by ACWR thresholds
     bar_colors = df[acwr_col].apply(
         lambda x: "blue" if x < 0.8 else ("red" if x > 1.5 else "grey")
     )
 
-    # Custom hover text showing both acute and chronic
+    # Custom hover showing both acute and chronic
     hover_texts = [
         f"<b>{name}</b><br>Acute: {acute:.1f}<br>Chronic: {chronic:.1f}"
         for name, acute, chronic in zip(df["Player Name"], df[acute_col], df[chronic_col])
@@ -126,7 +97,7 @@ def update_chart(selected_position, selected_metric):
 
     fig = go.Figure()
 
-    # Acute bar (main)
+    # Acute bar
     fig.add_trace(go.Bar(
         y=df["Player Name"],
         x=df[acute_col],
@@ -161,10 +132,5 @@ def update_chart(selected_position, selected_metric):
 
     return fig
 
-
-# -----------------------------
-# Run app
-# -----------------------------
 if __name__ == "__main__":
     app.run(debug=True)
-
